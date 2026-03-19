@@ -1,11 +1,11 @@
 {
   "title": "First Flight2",
   "author": "GMD",
-  "startScene": null,
+  "startScene": "s_mmxuyksp47x",
   "scenes": {
     "s_mmxuyksp47x": {
       "id": "s_mmxuyksp47x",
-      "title": "New Scene",
+      "title": "Doorway",
       "body": "",
       "media": {
         "type": "image",
