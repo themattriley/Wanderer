@@ -1,0 +1,30 @@
+{
+  "title": "First Flight2",
+  "author": "GMD",
+  "startScene": null,
+  "scenes": {
+    "s_mmxuyksp47x": {
+      "id": "s_mmxuyksp47x",
+      "title": "New Scene",
+      "body": "",
+      "media": {
+        "type": "image",
+        "url": "https://github.com/themattriley/Wanderer/blob/main/media/images/Doorway.png",
+        "caption": "",
+        "clickTarget": ""
+      },
+      "ambientAudio": {
+        "url": "",
+        "loop": true,
+        "volume": 0.5
+      },
+      "puzzle": {
+        "type": "none",
+        "question": "",
+        "answer": "",
+        "hint": ""
+      },
+      "choices": []
+    }
+  }
+}
