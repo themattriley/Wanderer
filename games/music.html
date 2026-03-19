@@ -174,63 +174,59 @@
       max-width: 500px;
     }
 
-    .buttons-row {
-      display: flex;
-      gap: 16px;
-      flex-wrap: wrap;
-      justify-content: center;
+    /* Circle ring of buttons */
+    .buttons-ring {
+      position: relative;
+      width: 300px;
+      height: 300px;
     }
 
     /* Music button */
     .music-btn {
-      width: 90px;
-      height: 90px;
+      width: 80px;
+      height: 80px;
       border: none;
-      border-radius: 8px;
+      border-radius: 50%;
       cursor: pointer;
-      position: relative;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      transition: transform 0.1s, filter 0.1s, box-shadow 0.15s;
-      filter: brightness(0.7) saturate(0.8);
-      box-shadow: 0 4px 0 rgba(0,0,0,0.5);
+      position: absolute;
+      transition: transform 0.1s, filter 0.15s, box-shadow 0.15s;
+      filter: brightness(0.65) saturate(0.7);
+      box-shadow: 0 4px 14px rgba(0,0,0,0.6);
+      transform: translate(-50%, -50%);
     }
+    .music-btn:disabled { cursor: not-allowed; filter: brightness(0.3) saturate(0.15); }
     .music-btn:hover:not(:disabled) {
       filter: brightness(0.9) saturate(1);
-      transform: translateY(-2px);
+      transform: translate(-50%, -50%) scale(1.1);
     }
-    .music-btn:active:not(:disabled),
-    .music-btn.lit {
-      filter: brightness(1.2) saturate(1.3);
-      transform: translateY(2px);
-      box-shadow: 0 0 0 rgba(0,0,0,0.5);
+    .music-btn:active:not(:disabled) {
+      transform: translate(-50%, -50%) scale(0.95);
     }
     .music-btn.lit {
-      filter: brightness(1.4) saturate(1.4);
-      box-shadow: 0 0 30px var(--btn-glow);
+      filter: brightness(1.5) saturate(1.4);
+      box-shadow: 0 0 36px var(--btn-glow), 0 0 70px var(--btn-glow);
+      transform: translate(-50%, -50%) scale(1.12);
     }
-    .music-btn:disabled { cursor: not-allowed; filter: brightness(0.4) saturate(0.3); }
-
-    .music-btn .note-name {
-      font-family: 'Press Start 2P', monospace;
-      font-size: 9px;
-      color: rgba(255,255,255,0.85);
-      pointer-events: none;
+    .music-btn[data-id="0"] {
+      background: #e03030; --btn-glow: #ff5555;
+      left: 50%; top: 10%;
     }
-    .music-btn .note-symbol {
-      font-size: 20px;
-      pointer-events: none;
+    .music-btn[data-id="1"] {
+      background: #e07820; --btn-glow: #ffaa44;
+      left: 90%; top: 36%;
     }
-
-    /* Individual button colors */
-    .music-btn[data-id="0"] { background: #c1121f; --btn-glow: #ff3a47; }
-    .music-btn[data-id="1"] { background: #e85d04; --btn-glow: #ff7c2f; }
-    .music-btn[data-id="2"] { background: #1b7a34; --btn-glow: #2ecc71; }
-    .music-btn[data-id="3"] { background: #1565c0; --btn-glow: #4da6ff; }
-    .music-btn[data-id="4"] { background: #6a0dad; --btn-glow: #b44fff; }
+    .music-btn[data-id="2"] {
+      background: #1a9940; --btn-glow: #33dd66;
+      left: 76%; top: 82%;
+    }
+    .music-btn[data-id="3"] {
+      background: #1560c8; --btn-glow: #44aaff;
+      left: 24%; top: 82%;
+    }
+    .music-btn[data-id="4"] {
+      background: #7a18cc; --btn-glow: #bb55ff;
+      left: 10%; top: 36%;
+    }
 
     /* Speed control */
     .speed-row {
@@ -397,29 +393,12 @@
   <!-- Buttons panel -->
   <div class="buttons-panel">
 
-    <div class="buttons-row">
-      <button class="music-btn" data-id="0" disabled>
-        <span class="note-symbol">🔴</span>
-        <span class="note-name">DO</span>
-      </button>
-      <button class="music-btn" data-id="1" disabled>
-        <span class="note-symbol">🟠</span>
-        <span class="note-name">RE</span>
-      </button>
-      <button class="music-btn" data-id="2" disabled>
-        <span class="note-symbol">🟢</span>
-        <span class="note-name">MI</span>
-      </button>
-    </div>
-    <div class="buttons-row">
-      <button class="music-btn" data-id="3" disabled>
-        <span class="note-symbol">🔵</span>
-        <span class="note-name">SOL</span>
-      </button>
-      <button class="music-btn" data-id="4" disabled>
-        <span class="note-symbol">🟣</span>
-        <span class="note-name">LA</span>
-      </button>
+    <div class="buttons-ring">
+      <button class="music-btn" data-id="0" disabled></button>
+      <button class="music-btn" data-id="1" disabled></button>
+      <button class="music-btn" data-id="2" disabled></button>
+      <button class="music-btn" data-id="3" disabled></button>
+      <button class="music-btn" data-id="4" disabled></button>
     </div>
 
     <!-- Speed selector -->
@@ -535,6 +514,15 @@
   let phase = 'idle';     // idle | watching | playing | over
   let noteSpeed = 700;    // ms between notes during playback
   let isLit = false;
+  let lastNote = -1;      // tracks last note added so we never repeat consecutively
+
+  // Always picks a note different from the previous one
+  function randomNote() {
+    let note;
+    do { note = Math.floor(Math.random() * 5); } while (note === lastNote);
+    lastNote = note;
+    return note;
+  }
 
   const buttons = document.querySelectorAll('.music-btn');
   const statusBar = document.getElementById('status-bar');
@@ -569,6 +557,7 @@
     sequence = [];
     playerIndex = 0;
     round = 0;
+    lastNote = -1;
     phase = 'idle';
     startBtn.disabled = true;
     nextRound();
@@ -579,8 +568,8 @@
     round++;
     playerIndex = 0;
 
-    // Add one new random note
-    sequence.push(Math.floor(Math.random() * 5));
+    // Add one new random note (guaranteed different from the previous one)
+    sequence.push(randomNote());
 
     // Briefly flash "ROUND X" then watch
     roundEl.textContent = round;
