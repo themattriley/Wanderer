@@ -677,12 +677,20 @@ function renderMinigames(sc) {
 }
 
 function renderRoomNav(sc) {
-  const dirs = (sc.roomNav||[]).filter(d=>d.photo&&d.targetScene&&story.scenes[d.targetScene]);
+  const all = (sc.roomNav||[]);
+  const dirs = all.filter(d => {
+    if (!d.photo) return false;
+    if (d.linkType==='game')   return !!d.gameUrl;
+    if (d.linkType==='arcade') return !!(d.targetScene && story.scenes[d.targetScene]);
+    return !!(d.targetScene && story.scenes[d.targetScene]);
+  });
   if (!dirs.length) return '';
   const cls = dirs.length===1?'single':dirs.length===3?'three':'';
   return `<div class="room-nav${cls?' '+cls:''}">
-    ${dirs.map(d=>`
-      <div class="rn-tile" onclick="goScene('${ea(d.targetScene)}')">
+    ${dirs.map(d=>{
+      const origIdx = all.indexOf(d);
+      return `
+      <div class="rn-tile" data-rn-idx="${origIdx}" onclick="rnTileActivate(this)">
         <img src="${ea(d.photo)}" alt="${ea(d.label||d.direction||'')}">
         <div class="rn-label">
           <div class="rn-text">
@@ -691,8 +699,19 @@ function renderRoomNav(sc) {
           </div>
           <span class="rn-arrow">→</span>
         </div>
-      </div>`).join('')}
+      </div>`;
+    }).join('')}
   </div>`;
+}
+
+function rnTileActivate(el) {
+  const sc = story.scenes[pState.cur];
+  const i = parseInt(el.dataset.rnIdx);
+  const d = (sc.roomNav||[])[i];
+  if (!d) return;
+  if (d.linkType==='game')        launchRNGame(d.gameUrl, d.gameTitle||'Game');
+  else if (d.linkType==='arcade') launchArcadeHub(d.targetScene);
+  else if (d.targetScene)         goScene(d.targetScene);
 }
 
 function launchGame(idx) {
@@ -718,6 +737,87 @@ function closeGame() {
   if (el) el.remove();
   // Restore ambient audio
   if (ambAudio) ambAudio.volume = ambMuted ? 0 : 0.5;
+}
+
+// ── ROOM NAV: launch a single game directly from a photo tile ──
+function launchRNGame(url, title) {
+  if (!url) return;
+  if (ambAudio) ambAudio.volume = 0;
+  const overlay = document.createElement('div');
+  overlay.className = 'mg-overlay fadein';
+  overlay.id = 'mg-overlay';
+  overlay.innerHTML = `
+    <div class="mg-overlay-nav">
+      <button class="btn btn-ghost btn-sm" onclick="closeGame()">← Back</button>
+      <span class="mg-overlay-title">${eh(title||'Game')}</span>
+    </div>
+    <iframe src="${ea(url)}" allowfullscreen></iframe>`;
+  document.body.appendChild(overlay);
+}
+
+// ── ARCADE HUB: show the mini-game grid for a scene as a full-screen overlay ──
+function launchArcadeHub(sceneId) {
+  const sc = story.scenes[sceneId];
+  if (!sc) return;
+  const games = (sc.minigames||[]).filter(g=>g.title&&g.url);
+  if (!games.length) return;
+  if (ambAudio) ambAudio.volume = 0;
+  const overlay = document.createElement('div');
+  overlay.className = 'mg-overlay fadein';
+  overlay.id = 'arcade-overlay';
+  overlay.dataset.sceneId = sceneId;
+  overlay.innerHTML = `
+    <div class="mg-overlay-nav">
+      <button class="btn btn-ghost btn-sm" onclick="closeArcadeHub()">← Back</button>
+      <span class="mg-overlay-title">${eh(sc.title||'Arcade')}</span>
+    </div>
+    <div style="padding:30px;overflow-y:auto;flex:1">
+      <div class="mg-grid">
+        ${games.map((g,i)=>`
+          <div class="mg-tile" onclick="launchGameFromArcade(${i},'${ea(sceneId)}')">
+            <span class="mg-tile-icon">${eh(g.icon||'🎮')}</span>
+            <div class="mg-tile-name">${eh(g.title)}</div>
+            ${g.desc?`<div class="mg-tile-desc">${eh(g.desc)}</div>`:''}
+            <span class="mg-tile-arr">Play →</span>
+          </div>`).join('')}
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+function closeArcadeHub() {
+  const el = document.getElementById('arcade-overlay');
+  if (el) el.remove();
+  if (ambAudio) ambAudio.volume = ambMuted ? 0 : 0.5;
+}
+
+// ── Launch a game from within the Arcade Hub — back button returns to hub ──
+function launchGameFromArcade(idx, sceneId) {
+  const sc = story.scenes[sceneId];
+  const g = sc?.minigames?.[idx];
+  if (!g?.url) return;
+  // Hide the arcade overlay while the game is running
+  const arcadeEl = document.getElementById('arcade-overlay');
+  if (arcadeEl) arcadeEl.style.display = 'none';
+  const overlay = document.createElement('div');
+  overlay.className = 'mg-overlay fadein';
+  overlay.id = 'mg-overlay';
+  overlay.innerHTML = `
+    <div class="mg-overlay-nav">
+      <button class="btn btn-ghost btn-sm" onclick="closeGameToArcade('${ea(sceneId)}')">← Back to Arcade</button>
+      <span class="mg-overlay-title">${eh(g.title)}</span>
+    </div>
+    <iframe src="${ea(g.url)}" allowfullscreen></iframe>`;
+  document.body.appendChild(overlay);
+}
+
+function closeGameToArcade(sceneId) {
+  const el = document.getElementById('mg-overlay');
+  if (el) el.remove();
+  // Restore arcade overlay if it still exists, otherwise re-launch it
+  const arcadeEl = document.getElementById('arcade-overlay');
+  if (arcadeEl) arcadeEl.style.display = 'flex';
+  else launchArcadeHub(sceneId);
 }
 
 function submitPuz() {
@@ -1153,46 +1253,106 @@ function refreshMG() {
   if(el) el.innerHTML=(tempEdit.minigames||[]).map((g,i)=>mgRow(g,i)).join('');
 }
 
-function rnRow(d, i) {
-  const others = Object.values(story.scenes).filter(x=>x.id!==tempEdit.id);
-  const dirs = ['North','South','East','West','Up','Down','Left','Right','Forward','Back','Custom'];
-  return `<div class="ch-edit-row" id="rnr-${i}" style="grid-template-columns:120px auto 1fr 1fr auto;align-items:end">
-    <div class="field">
-      <label class="lbl">Direction Label</label>
-      <select class="sel" onchange="tempEdit.roomNav[${i}].direction=this.value;if(this.value==='Custom'){this.nextElementSibling.style.display='block'}else{this.nextElementSibling.style.display='none'}">
-        ${dirs.map(dv=>`<option value="${dv}" ${(d.direction||'North')===dv?'selected':''}>${dv}</option>`).join('')}
-      </select>
-      <input class="inp" type="text" value="${ea(d.direction&&!dirs.slice(0,-1).includes(d.direction)?d.direction:'')}"
-        placeholder="Custom label…" style="margin-top:5px;display:${d.direction&&!dirs.slice(0,-1).includes(d.direction)?'block':'none'}"
-        oninput="tempEdit.roomNav[${i}].direction=this.value">
-    </div>
-    <div class="field">
-      <label class="lbl">Name <span style="opacity:.5">(optional)</span></label>
-      <input class="inp" type="text" value="${ea(d.label||'')}" placeholder="e.g. The Library"
-        oninput="tempEdit.roomNav[${i}].label=this.value">
-    </div>
-    <div class="field">
-      <label class="lbl">Photo URL</label>
-      <input class="inp" type="url" value="${ea(d.photo||'')}" placeholder="https://yourusername.github.io/repo/media/images/library.jpg"
-        oninput="tempEdit.roomNav[${i}].photo=this.value">
-    </div>
-    <div class="field">
-      <label class="lbl">Leads To</label>
+function rnLinkFields(d, i, others, arcadeScenes) {
+  const lt = d.linkType || 'scene';
+  if (!others) others = Object.values(story.scenes).filter(x=>x.id!==tempEdit.id);
+  if (!arcadeScenes) arcadeScenes = others.filter(s=>(s.minigames||[]).some(g=>g.title&&g.url));
+  if (lt === 'scene') {
+    return `<div class="field">
+      <label class="lbl">Target Scene</label>
       <select class="sel" onchange="tempEdit.roomNav[${i}].targetScene=this.value">
         <option value="">— select scene —</option>
-        ${others.map(sc=>`<option value="${ea(sc.id)}" ${d.targetScene===sc.id?'selected':''}>${eh(sc.title||sc.id)}</option>`).join('')}
+        ${others.map(sc=>`<option value="${ea(sc.id)}" ${(d.targetScene||'')=== sc.id?'selected':''}>${eh(sc.title||sc.id)}</option>`).join('')}
       </select>
+    </div>`;
+  }
+  if (lt === 'game') {
+    return `<div class="row row-2">
+      <div class="field">
+        <label class="lbl">Game Title</label>
+        <input class="inp" type="text" value="${ea(d.gameTitle||'')}" placeholder="e.g. The Cipher Lock"
+          oninput="tempEdit.roomNav[${i}].gameTitle=this.value">
+      </div>
+      <div class="field">
+        <label class="lbl">Game HTML URL</label>
+        <input class="inp" type="url" value="${ea(d.gameUrl||'')}" placeholder="https://yourusername.github.io/repo/games/cipher.html"
+          oninput="tempEdit.roomNav[${i}].gameUrl=this.value">
+      </div>
+    </div>`;
+  }
+  if (lt === 'arcade') {
+    if (!arcadeScenes.length) {
+      return `<p class="help" style="color:var(--amber);margin-top:4px">No scenes with mini-games found. Configure a Mini-game Hub on a scene first, then return here.</p>`;
+    }
+    return `<div class="field">
+      <label class="lbl">Arcade Scene <span style="opacity:.5">(must have Mini-game Hub configured)</span></label>
+      <select class="sel" onchange="tempEdit.roomNav[${i}].targetScene=this.value">
+        <option value="">— select arcade scene —</option>
+        ${arcadeScenes.map(sc=>`<option value="${ea(sc.id)}" ${(d.targetScene||'')=== sc.id?'selected':''}>${eh(sc.title||sc.id)}</option>`).join('')}
+      </select>
+      <p class="help" style="margin-top:5px">When the player clicks this tile, the arcade game selection screen opens. Each game has a "Back to Arcade" button.</p>
+    </div>`;
+  }
+  return '';
+}
+
+function chRNLinkType(i, val) {
+  if (!tempEdit.roomNav[i]) return;
+  tempEdit.roomNav[i].linkType = val;
+  const others = Object.values(story.scenes).filter(x=>x.id!==tempEdit.id);
+  const arcadeScenes = others.filter(s=>(s.minigames||[]).some(g=>g.title&&g.url));
+  const el = document.getElementById(`rn-link-${i}`);
+  if (el) el.innerHTML = rnLinkFields(tempEdit.roomNav[i], i, others, arcadeScenes);
+}
+
+function rnRow(d, i) {
+  const others = Object.values(story.scenes).filter(x=>x.id!==tempEdit.id);
+  const arcadeScenes = others.filter(s=>(s.minigames||[]).some(g=>g.title&&g.url));
+  const dirs = ['North','South','East','West','Up','Down','Left','Right','Forward','Back','Custom'];
+  const lt = d.linkType || 'scene';
+  return `<div style="margin-bottom:10px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+    <div class="ch-edit-row" id="rnr-${i}" style="grid-template-columns:120px auto 1fr auto;align-items:end;border:none;border-radius:0;border-bottom:1px solid var(--border)">
+      <div class="field">
+        <label class="lbl">Direction Label</label>
+        <select class="sel" onchange="tempEdit.roomNav[${i}].direction=this.value;if(this.value==='Custom'){this.nextElementSibling.style.display='block'}else{this.nextElementSibling.style.display='none'}">
+          ${dirs.map(dv=>`<option value="${dv}" ${(d.direction||'North')===dv?'selected':''}>${dv}</option>`).join('')}
+        </select>
+        <input class="inp" type="text" value="${ea(d.direction&&!dirs.slice(0,-1).includes(d.direction)?d.direction:'')}"
+          placeholder="Custom label…" style="margin-top:5px;display:${d.direction&&!dirs.slice(0,-1).includes(d.direction)?'block':'none'}"
+          oninput="tempEdit.roomNav[${i}].direction=this.value">
+      </div>
+      <div class="field">
+        <label class="lbl">Name <span style="opacity:.5">(optional)</span></label>
+        <input class="inp" type="text" value="${ea(d.label||'')}" placeholder="e.g. The Library"
+          oninput="tempEdit.roomNav[${i}].label=this.value">
+      </div>
+      <div class="field">
+        <label class="lbl">Photo URL</label>
+        <input class="inp" type="url" value="${ea(d.photo||'')}" placeholder="https://yourusername.github.io/repo/media/images/photo.jpg"
+          oninput="tempEdit.roomNav[${i}].photo=this.value">
+      </div>
+      <div class="field">
+        <label class="lbl">&nbsp;</label>
+        <button class="btn btn-del btn-xs" onclick="removeRN(${i})">✕</button>
+      </div>
     </div>
-    <div class="field">
-      <label class="lbl">&nbsp;</label>
-      <button class="btn btn-del btn-xs" onclick="removeRN(${i})">✕</button>
+    <div style="padding:12px 14px 14px;background:var(--bg3)">
+      <div class="field" style="margin-bottom:10px">
+        <label class="lbl">This tile opens</label>
+        <select class="sel" onchange="chRNLinkType(${i},this.value)">
+          <option value="scene"  ${lt==='scene'  ?'selected':''}>A story scene</option>
+          <option value="game"   ${lt==='game'   ?'selected':''}>A single mini-game (fullscreen)</option>
+          <option value="arcade" ${lt==='arcade' ?'selected':''}>The Arcade Hub (game selection screen)</option>
+        </select>
+      </div>
+      <div id="rn-link-${i}">${rnLinkFields(d, i, others, arcadeScenes)}</div>
     </div>
   </div>`;
 }
 function addRN() {
   if(!tempEdit.roomNav) tempEdit.roomNav=[];
   if(tempEdit.roomNav.length>=4) return;
-  tempEdit.roomNav.push({direction:'North',label:'',photo:'',targetScene:''});
+  tempEdit.roomNav.push({direction:'North',label:'',photo:'',linkType:'scene',targetScene:'',gameUrl:'',gameTitle:''});
   renderSceneEditor();
 }
 function removeRN(i) {
@@ -1397,10 +1557,28 @@ function renderMinigames(sc){
   return'<div class="mg-grid">'+games.map(function(g,i){return'<div class="mg-tile" onclick="launchGame('+i+')"><span class="mg-tile-icon">'+eh(g.icon||'🎮')+'</span><div class="mg-tile-name">'+eh(g.title)+'</div>'+(g.desc?'<div class="mg-tile-desc">'+eh(g.desc)+'</div>':'')+'<span class="mg-tile-arr">Play &rarr;</span></div>';}).join('')+'</div>';
 }
 function renderRoomNav(sc){
-  var dirs=(sc.roomNav||[]).filter(function(d){return d.photo&&d.targetScene&&story.scenes[d.targetScene];});
+  var all=(sc.roomNav||[]);
+  var dirs=all.filter(function(d){
+    if(!d.photo)return false;
+    if(d.linkType==='game')return!!d.gameUrl;
+    if(d.linkType==='arcade')return!!(d.targetScene&&story.scenes[d.targetScene]);
+    return!!(d.targetScene&&story.scenes[d.targetScene]);
+  });
   if(!dirs.length)return'';
   var cls=dirs.length===1?'single':dirs.length===3?'three':'';
-  return'<div class="room-nav'+(cls?' '+cls:'')+'">'+dirs.map(function(d){return'<div class="rn-tile" onclick="goScene(\''+ea(d.targetScene)+'\')"><img src="'+ea(d.photo)+'" alt="'+ea(d.label||d.direction||'')+'"><div class="rn-label"><div class="rn-text">'+(d.direction?'<span class="rn-dir">'+eh(d.direction)+'</span>':'')+(d.label?'<span class="rn-name">'+eh(d.label)+'</span>':'')+'</div><span class="rn-arrow">&rarr;</span></div></div>';}).join('')+'</div>';
+  return'<div class="room-nav'+(cls?' '+cls:'')+'">'+dirs.map(function(d){
+    var origIdx=all.indexOf(d);
+    return'<div class="rn-tile" data-rn-idx="'+origIdx+'" onclick="rnTileActivate(this)"><img src="'+ea(d.photo)+'" alt="'+ea(d.label||d.direction||'')+'"><div class="rn-label"><div class="rn-text">'+(d.direction?'<span class="rn-dir">'+eh(d.direction)+'</span>':'')+(d.label?'<span class="rn-name">'+eh(d.label)+'</span>':'')+'</div><span class="rn-arrow">&rarr;</span></div></div>';
+  }).join('')+'</div>';
+}
+function rnTileActivate(el){
+  var sc=story.scenes[pState.cur];
+  var i=parseInt(el.dataset.rnIdx);
+  var d=(sc.roomNav||[])[i];
+  if(!d)return;
+  if(d.linkType==='game')launchRNGame(d.gameUrl,d.gameTitle||'Game');
+  else if(d.linkType==='arcade')launchArcadeHub(d.targetScene);
+  else if(d.targetScene)goScene(d.targetScene);
 }
 function launchGame(idx){
   var sc=story.scenes[pState.cur];
@@ -1412,10 +1590,42 @@ function launchGame(idx){
   el.innerHTML='<div class="mg-overlay-nav"><button class="btn btn-ghost btn-sm" onclick="closeGame()">&#8592; Back to Hub</button><span class="mg-overlay-title">'+eh(g.title)+'</span></div><iframe src="'+ea(g.url)+'" allowfullscreen></iframe>';
   document.body.appendChild(el);
 }
-function closeGame(){
-  var el=document.getElementById('mg-overlay');if(el)el.remove();
-  if(ambAudio)ambAudio.volume=ambMuted?0:0.5;
+function closeGame(){var el=document.getElementById('mg-overlay');if(el)el.remove();if(ambAudio)ambAudio.volume=ambMuted?0:0.5;}
+function launchRNGame(url,title){
+  if(!url)return;
+  if(ambAudio)ambAudio.volume=0;
+  var el=document.createElement('div');
+  el.className='mg-overlay fadein';el.id='mg-overlay';
+  el.innerHTML='<div class="mg-overlay-nav"><button class="btn btn-ghost btn-sm" onclick="closeGame()">&#8592; Back</button><span class="mg-overlay-title">'+eh(title||'Game')+'</span></div><iframe src="'+ea(url)+'" allowfullscreen></iframe>';
+  document.body.appendChild(el);
 }
+function launchArcadeHub(sceneId){
+  var sc=story.scenes[sceneId];
+  if(!sc)return;
+  var games=(sc.minigames||[]).filter(function(g){return g.title&&g.url;});
+  if(!games.length)return;
+  if(ambAudio)ambAudio.volume=0;
+  var el=document.createElement('div');
+  el.className='mg-overlay fadein';el.id='arcade-overlay';el.dataset.sceneId=sceneId;
+  el.innerHTML='<div class="mg-overlay-nav"><button class="btn btn-ghost btn-sm" onclick="closeArcadeHub()">&#8592; Back</button><span class="mg-overlay-title">'+eh(sc.title||'Arcade')+'</span></div><div style="padding:30px;overflow-y:auto;flex:1"><div class="mg-grid">'+games.map(function(g,i){return'<div class="mg-tile" onclick="launchGameFromArcade('+i+',\''+ea(sceneId)+'\')"><span class="mg-tile-icon">'+eh(g.icon||'🎮')+'</span><div class="mg-tile-name">'+eh(g.title)+'</div>'+(g.desc?'<div class="mg-tile-desc">'+eh(g.desc)+'</div>':'')+'<span class="mg-tile-arr">Play &rarr;</span></div>';}).join('')+'</div></div>';
+  document.body.appendChild(el);
+}
+function closeArcadeHub(){var el=document.getElementById('arcade-overlay');if(el)el.remove();if(ambAudio)ambAudio.volume=ambMuted?0:0.5;}
+function launchGameFromArcade(idx,sceneId){
+  var sc=story.scenes[sceneId];
+  var g=sc&&sc.minigames&&sc.minigames[idx];
+  if(!g||!g.url)return;
+  var arcadeEl=document.getElementById('arcade-overlay');
+  if(arcadeEl)arcadeEl.style.display='none';
+  var el=document.createElement('div');
+  el.className='mg-overlay fadein';el.id='mg-overlay';
+  el.innerHTML='<div class="mg-overlay-nav"><button class="btn btn-ghost btn-sm" onclick="closeGameToArcade(\''+ea(sceneId)+'\')">&#8592; Back to Arcade</button><span class="mg-overlay-title">'+eh(g.title)+'</span></div><iframe src="'+ea(g.url)+'" allowfullscreen></iframe>';
+  document.body.appendChild(el);
+}
+function closeGameToArcade(sceneId){
+  var el=document.getElementById('mg-overlay');if(el)el.remove();
+  var arcadeEl=document.getElementById('arcade-overlay');
+  if(arcadeEl)arcadeEl.style.display='flex';else launchArcadeHub(sceneId);
 }
 function renderMedia(sc){
   if(!sc.media||!sc.media.url||sc.media.type==='none')return'';
